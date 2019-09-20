@@ -1,0 +1,267 @@
+@parallel(ncpus=2,timeout=90)
+def divisorslist(p): 
+	return divisors(p)
+
+def consistency_check(n,state,F):
+	if n <= 2:
+		return 1
+	for i in range(2,n):
+		for j in range(1,i):
+			tmp = F[i][0][state[i]] - F[j][0][state[j]]
+			if tmp not in F[i][j]:
+				return 0
+	return 1
+
+
+# Compute the F array factors that are consistent with one another
+# we dont really check on bound of divisors, since in almost all our experiments the number of divisors are less than 40
+def compute_consistency_check_state(d,F,vbose):
+	import time
+	start_check_time = time.time()
+	# create space for array
+	stateF = [[j for j in range(d+1)] for i in range(d+1)]
+	stateF = F
+	finalstate = [0 for i in range(d+1)]
+	if (vbose):
+		for i in range(1,d+1):
+			print "Compute state Before [i]", stateF[i][0]
+
+	for i in range(2,d+1):
+		for j in range(1,i):
+			q = 1
+			p = 1
+			while (p < len(stateF[i][0])):
+				while (q < len(stateF[j][0])):
+					if ((stateF[i][0][p] != 0) and (stateF[j][0][q] != 0)):
+						tmp = stateF[i][0][p] - stateF[j][0][q]
+						if tmp in stateF[i][j]:
+							break
+					q += 1
+				if (q == len(stateF[j][0])): # we know stateF[i][0][p] is not compatible
+					stateF[i][0][p] = 0
+				q = 1
+				p += 1
+				while ((p < len(stateF[i][0])) and (stateF[i][0][p] == 0)) :
+					p += 1
+
+# Now clean up stateF[1][0]
+	for q in range(1,len(stateF[1][0])):
+		for i in range(2,d+1):
+			flag = 0
+			for p in range(1,len(stateF[i][0])):
+				if ((stateF[i][0][p] != 0) and (stateF[1][0][q]) != 0):
+					tmp = stateF[i][0][p] - stateF[1][0][q]
+					if tmp in stateF[i][1] :
+						flag = 1
+			if (flag == 0): # this means qth element in first row is inconsistent
+				stateF[1][0][q] = 0
+
+	for i in range(1,d+1):
+		flag = 0
+		for j in range(1,len(stateF[i][0])):
+			if (stateF[i][0][j] != 0):
+				finalstate[i] = j
+				flag = 1
+		if (flag == 0):
+			print "Error: No consistent element in row: ", i, stateF[i][0]
+			return finalstate, -1
+
+	if (vbose):
+		for i in range(1,d+1):
+			print "Compute state final [i]", stateF[i][0]
+		print "Final state:", finalstate, "\n"
+	print "Consistency Check time:", time.time() - start_check_time
+	return finalstate, 0
+
+
+# A subroutine to determine whether the given polynomial has a positive integer root
+
+def check_posint_roots(tpoly):
+	try:
+		tl = tpoly.roots()
+	except RuntimeError:
+		return 0, -1
+	for i in range(len(tl)):
+		if ((tl[i][0].is_integer() == 1) and (tl[i][0] >= 0)):
+			return 1, tl[i][0]
+	return 0, -1
+
+# A subroutine for enumerating the values of x0.
+# X is taken as an input only for testing purposes and is not used to compute a solution.
+
+@parallel(ncpus=2,timeout=0)
+def enum_x0(d,n,b,state,F,P,X,vbose):
+
+	import time
+	start_enum_time = time.time()
+	R = PolynomialRing(QQ, 'x')
+
+	for x0 in range(2^b):
+		G = [[0,P[i]] for i in range(d+1)]
+		T = [0 for i in range(n)]
+		G[0][0] = x0
+		T[0] = x0
+		if (vbose):
+			print "x0:", x0, "G0", G, "T:", T
+		for i in range(1,d+1):
+			G[i][0] = x0 + F[i][0][state[i]]
+			T[i] = G[i][0]
+		poly = R.lagrange_polynomial(G[0:d+1])
+		if(vbose):		# For debugging
+			print "poly: ", poly, '\n'
+		flg = 1
+		for i in range(d+1):
+			if (poly.coefficients()[i].is_integer() == False) or (poly.coefficients()[i] <= 0) :
+				flg = 0
+		if(vbose):		# For debugging
+			print "flg: ", flg, '\n'
+		if (flg != 0):
+			i = d+1
+			while (flg==1 and i<n):
+				tpoly = poly - P[i]
+				flg,rt = check_posint_roots(tpoly)
+				T[i] = rt
+				if(vbose):		# For debugging
+					print "tpoly: ", tpoly
+					print "flg: ", flg
+					print "rt: ", rt
+					print "i: ", i
+				i += 1
+		if(vbose):		# For debugging
+			print "flg: ", flg, '\n'
+
+		if (flg == 0):
+			if(x0 < 2^b - 1):
+				continue
+			else:
+				return 0
+		else:
+			if(vbose):		# For debugging
+				print "Found some solution: ", G, '\n'
+				print "poly: ", poly, '\n'
+				print "Now testing with the input X: ", X, '\n'
+				print "Now testing with the input P: ", P, '\n'
+			flgt = 1
+			for i in range(n):
+				if (T[i] != X[i]):			# only here the input X is used
+					if(vbose):		# For debugging
+						print "Solution Mismatch at i = ", i, ", T[i] = ", T[i], ", X[i] = ", X[i]
+					flgt = 0
+			if((x0 < 2^b - 1) and (flgt == 0)):
+				continue
+			if((x0 == 2^b - 1) and (flgt == 0)):
+				return 0
+			print "x:", x0, "Found the original polynomial:",  poly,'\n'
+			print "Time for enum:", time.time() - start_enum_time
+			return 1
+	return 0
+
+
+def gen_matrix_polyeval(d,a,b,n,rn,bnd,vbose,given_poly,polyOpArray,ipArray):
+	import time
+
+	if given_poly != 0 : # This is the case where the polynomial outputs are given
+		P = [(long)(polyOpArray[i]) for i in range (n)]
+		A = [0 for i in range(d+1)]
+		X = [ipArray[i] for i in range(n)]
+	else :
+		A = [randint(1,2^a-1) for i in range(d+1)]
+		X = [randint(0,2^b-1) for j in range(n)]
+		X = list(set(X)) # make the list unique
+		X.sort()	# This is not a problem as the polynomial is monotonic
+		n = len(X)
+		P = [ sum(A[i]* X[j]^i for i in range(d+1)) for j in range(n) ] # vector of outputs
+	D = [[0 for j in range(n)] for i in range(n)]
+	F = [[] for i in range(n)]
+	nF = [[] for i in range(n)]
+
+	gen_mx_start = time.time()
+	for i in range(1,rn+1): # changed HERE NOTE  from n to (rn+1)
+		for j in range(0,i):
+			timeout_count = 0
+			D[i][j] = P[i] - P[j]
+			if(D[i][j]!=0):
+				tmp = divisorslist(D[i][j])
+				if tmp[0] != 1: # we have timed out : 						print "divisorslist timedout:", i
+					F[i].append([0])
+					nF[i].append(len([0]))
+					timeout_count += 1
+					continue
+				k = 0
+				while(tmp[k] < 2^b):
+					k += 1
+				F[i].append(tmp[0:k])
+				nF[i].append(len(tmp[0:k]))
+			else:
+				F[i].append([0])
+				nF[i].append(len([0]))
+	print "Timeout count", timeout_count, "Step 0 done. time: ", time.time() - gen_mx_start
+	if(vbose):		# For debugging
+		print "A:", A, "\n"
+		print "X:", X, "\n"
+		print "P:", P, "\n"
+		print "D:", D, "\n"
+		print "F:", F, "\n"
+		print "nF:", nF, "\n"
+
+	return A,X,P,F # return params to prevent error message from caller
+
+
+# The same function is used to for both real-life data values as well as SAGE generated random values
+# given_poly != 0 means there is a pre-specified polynomial already given [in the case of real-life data values
+def solve_poly_eval(d,a,b,n,rn,bnd,vbose,given_poly,polyOpArray,ipArray):
+
+	import time
+	start_time = time.time()
+
+# 	We are genrating A,X only for testing purposes.
+	R = PolynomialRing(QQ, 'x')
+
+	A,X,P,F = gen_matrix_polyeval(d,a,b,n,rn,bnd,vbose,given_poly,polyOpArray,ipArray)
+
+	print("gen_matrix_polyeval Execution time: %s seconds " % (time.time() - start_time))
+
+	if(vbose):		# For debugging
+		print "F is : ", F
+		print "F[][0]:", [F[i][0] for i in range(1,d+1)], "\n"
+	state, flagc = compute_consistency_check_state(d,F,vbose)
+	if flagc == -1:
+		print("Flagc -1 : Execution time: %s seconds " % (time.time() - start_time))
+		return 1
+
+
+	flge = enum_x0(d,rn,b,state,F,P,X,vbose)
+	if(vbose):		# For debugging
+		print "A:", A, "\n"
+		print "X:", X, "\n"
+		print "P:", P, "\n"
+		print "F:", F, "\n"
+		print "F[][0]:", [F[i][0] for i in range(1,rn)], "\n"
+		print "len[F][0]:", [len(F[i][0]) for i in range(1,rn)], "\n"
+	print("Total Execution time: %s seconds " % (time.time() - start_time))
+	print "Minutes:", (time.time() - start_time)/60
+	return 1
+
+
+# End of all routines
+
+
+PGiven = PolynomialRing(QQ, 'x')
+PGiven = x*0  # For the Random system generated case
+# An example of a uniform randomly generated polynomial used in real data scenario
+PGiven = 13789906*x^9 + 5575202*x^8 + 12097929*x^7 + 3376257*x^6 + 6221670*x^5 + 9133734*x^4 + 6231180*x^3 + 11646309*x^2 + 6259232*x + 15683968
+
+n = 40
+polyOpArray = [ 0 for i in range(n) ] # vector of outputs
+inputArray = [1978,2157,1658,1288,1466,1280,36,1629,1236,1184,1310,1621,1284,1327,1177,1487,1262,1241,1282,1367,1455,2226,1290,1498,1267,1249,1297,1260,1161,1399,1728,1590,1320,1272,1383,1285,1262,1319,1312,1324]
+
+ipArray = [inputArray[i] for i in range(n)]
+polyOpArray = [PGiven(x=inputArray[i]) for i in range(n)]
+ipArraySort = sorted(ipArray)
+polyOpArraySort = sorted(polyOpArray)
+
+# This run is for 24 bit inputs and 24 bit coefficients
+solve_poly_eval(9,24,24,n,15,10,0,PGiven,polyOpArraySort,ipArraySort)
+if PGiven != 0 :
+    print "Given poly:", PGiven
+print "End Execution"
