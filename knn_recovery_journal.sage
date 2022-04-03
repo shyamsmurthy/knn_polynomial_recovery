@@ -18,7 +18,7 @@ def setup_prime_cache(x):
 def divisorslist_bound(p,d,a,b):
     return reduce(list.__add__, ([i] for i in range(1, 2^b) if p % i == 0))
 
-def old_divisorslist_bound_optimized(n,d,a,b): # NOTE to be used for less than 2^28 (b=28) only
+def divisorslist_bound_optimized(n,d,a,b): # NOTE to be used for less than 2^28 (b=28) only
     fl=[]
     bnd=28
     if b <= 28:
